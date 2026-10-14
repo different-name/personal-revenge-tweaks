@@ -126,8 +126,56 @@
         return cleaned;
     }
 
-    // the experiment's swipe-to-expand server list, forced back to the unenrolled defaults
-    const withoutHomeDrawer = (_args, config) => ({ ...config, enableHome: false, landOnHome: false, enablePeekHint: false });
+    const disabledExperiments = new Set([
+        "2025-10-mobile-home-drawer",
+        "2025-12-nitro-s-rewards",
+        "2026-01-mobile-go-live-entrypoint",
+        "2026-03-mobile-quest-home-red-dot-notification",
+        "2026-04-gifting-badge",
+        "2026-04-http-request-sample",
+        "2026-04-mobile-boost-progress-bar",
+        "2026-04-mobile-go-live-upsell",
+        "2026-05-bounty-stale-refresh-quest-home",
+        "2026-05-server-theme-user",
+        "2026-06-android-two-week-trials",
+        "2026-06-gummy-bears",
+        "2026-06-gummy-viewers",
+        "2026-06-mobile-friendship-anniversary",
+        "2026-06-mobile-server-tag",
+        "2026-07-ad-recheck-interval-experiment",
+        "2026-07-custom-typing-indicator",
+        "2026-07-mobile-boosting-optimizations",
+        "2026-07-nitro-floating-subscribe",
+        "2026-07-shop-this-look-mobile",
+        "2026-08-bounties-mobile-quest-bar",
+        "2026-08-nitro-tenure-badge-withheld-state",
+        "2026-09-bounties-android-quest-bar-smoke-animation",
+        "2026-09-gifting-badge-coachmark-audience",
+        "2026-09-mobile-nitro-upsell-in-shop-feed",
+    ]);
+
+    function findExperiments() {
+        const found = new Map();
+        const visit = value => {
+            const name = value?.definition?.name;
+            if (disabledExperiments.has(name) && typeof value.getConfig === "function") found.set(name, value);
+        };
+        metro.findAll(exports => {
+            if (!exports || typeof exports !== "object") return false;
+            try {
+                visit(exports);
+                for (const key of Object.keys(exports)) visit(exports[key]);
+            } catch {}
+            return false;
+        });
+        return found.values();
+    }
+
+    // the original hooks still run so hook order stays stable, only their result is swapped for the unenrolled config
+    function unenrolled(experiment) {
+        const config = Object.freeze({ ...experiment.definition.defaultConfig });
+        return () => config;
+    }
 
     let unpatches = [];
 
@@ -141,10 +189,11 @@
             unpatches.push(patcher.after("getUserProfile", UserProfileStore, cleanProfile));
             unpatches.push(patcher.after("getGuildMemberProfile", UserProfileStore, cleanProfile));
             unpatches.push(stripUserFields());
-            const homeDrawer = metro.findByProps("MobileHomeDrawerExperiment")?.MobileHomeDrawerExperiment;
-            if (homeDrawer) {
-                unpatches.push(patcher.after("getConfig", homeDrawer, withoutHomeDrawer));
-                unpatches.push(patcher.after("useConfig", homeDrawer, withoutHomeDrawer));
+            for (const experiment of findExperiments()) {
+                unpatches.push(patcher.after("getConfig", experiment, unenrolled(experiment)));
+                if (typeof experiment.useConfig === "function") {
+                    unpatches.push(patcher.after("useConfig", experiment, unenrolled(experiment)));
+                }
             }
             UserProfileStore.emitChange();
         },
