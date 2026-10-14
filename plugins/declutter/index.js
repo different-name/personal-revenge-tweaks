@@ -3,6 +3,7 @@
     const runtime = metro.findByProps("jsx", "jsxs", "Fragment");
     const UserStore = metro.findByStoreName("UserStore");
     const UserProfileStore = metro.findByStoreName("UserProfileStore");
+    const ApexExperimentStore = metro.findByStoreName("ApexExperimentStore");
     const { View } = metro.common.ReactNative;
 
     const navButtons = new Set(["Quests", "Shop", "Nitro", "Send a gift"]);
@@ -154,27 +155,9 @@
         "2026-09-mobile-nitro-upsell-in-shop-feed",
     ]);
 
-    function findExperiments() {
-        const found = new Map();
-        const visit = value => {
-            const name = value?.definition?.name;
-            if (disabledExperiments.has(name) && typeof value.getConfig === "function") found.set(name, value);
-        };
-        metro.findAll(exports => {
-            if (!exports || typeof exports !== "object") return false;
-            try {
-                visit(exports);
-                for (const key of Object.keys(exports)) visit(exports[key]);
-            } catch {}
-            return false;
-        });
-        return found.values();
-    }
-
-    // the original hooks still run so hook order stays stable, only their result is swapped for the unenrolled config
-    function unenrolled(experiment) {
-        const config = Object.freeze({ ...experiment.definition.defaultConfig });
-        return () => config;
+    // no assignment means getConfig and useConfig fall back to the default config and skip exposure tracking
+    function unassignExperiments(args, result) {
+        return disabledExperiments.has(args[2]) ? [result?.[0] ?? null, null] : result;
     }
 
     let unpatches = [];
@@ -189,12 +172,8 @@
             unpatches.push(patcher.after("getUserProfile", UserProfileStore, cleanProfile));
             unpatches.push(patcher.after("getGuildMemberProfile", UserProfileStore, cleanProfile));
             unpatches.push(stripUserFields());
-            for (const experiment of findExperiments()) {
-                unpatches.push(patcher.after("getConfig", experiment, unenrolled(experiment)));
-                if (typeof experiment.useConfig === "function") {
-                    unpatches.push(patcher.after("useConfig", experiment, unenrolled(experiment)));
-                }
-            }
+            unpatches.push(patcher.after("getEvaluationAndAssignmentInner", ApexExperimentStore, unassignExperiments));
+            ApexExperimentStore.emitChange();
             UserProfileStore.emitChange();
         },
         onUnload() {
